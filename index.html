@@ -173,10 +173,22 @@
   </table>
   <div id="tx-empty" class="empty" style="display:none;">No transactions yet.</div>
 
+  <h2>Sync from Claude</h2>
+  <div class="sub" style="margin-bottom:8px;">
+    Ask Claude (with Gmail access) to fetch new bank emails and reply with a JSON array
+    using the shape <code>{id,date,bank,account,direction,amount,note}</code>. Paste it here.
+    Existing entries with the same <code>id</code> are skipped — safe to paste repeatedly.
+  </div>
+  <textarea id="json-paste" placeholder='[{"id":"gmail-abc","date":"2026-04-28T...","bank":"axis","account":"1234","direction":"debit","amount":450,"note":"Swiggy"}]'></textarea>
+  <div class="row">
+    <button class="primary" id="json-import-btn">Merge JSON</button>
+    <span id="json-msg" class="sub" style="margin: 10px 0 0; align-self: center;"></span>
+  </div>
+
   <h2>Backup</h2>
   <div class="row">
     <button class="ghost"  id="export-btn">Export JSON</button>
-    <button class="ghost"  id="import-btn">Import JSON</button>
+    <button class="ghost"  id="import-btn">Import file</button>
     <input type="file" id="import-file" accept="application/json" hidden />
     <button class="danger" id="reset-btn">Reset all</button>
   </div>
@@ -406,17 +418,47 @@ $("export-btn").addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+function mergeJson(text) {
+  const incoming = JSON.parse(text);
+  if (!Array.isArray(incoming)) throw new Error("expected a JSON array");
+  const existing = load();
+  const seen = new Set(existing.map(t => t.id));
+  let added = 0;
+  for (const t of incoming) {
+    if (!t || typeof t !== "object") continue;
+    if (!t.id || !t.date || !t.bank || !t.direction || typeof t.amount !== "number") continue;
+    if (seen.has(t.id)) continue;
+    existing.push(t);
+    seen.add(t.id);
+    added++;
+  }
+  save(existing);
+  render();
+  return { added, skipped: incoming.length - added };
+}
+
+$("json-import-btn").addEventListener("click", () => {
+  const msg = $("json-msg");
+  try {
+    const r = mergeJson($("json-paste").value);
+    $("json-paste").value = "";
+    msg.textContent = `Added ${r.added}, skipped ${r.skipped} (already present or invalid).`;
+    msg.style.color = r.added > 0 ? "var(--credit)" : "var(--muted)";
+  } catch (err) {
+    msg.textContent = "Invalid JSON: " + err.message;
+    msg.style.color = "var(--debit)";
+  }
+});
+
 $("import-btn").addEventListener("click", () => $("import-file").click());
 $("import-file").addEventListener("change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   try {
-    const data = JSON.parse(await file.text());
-    if (!Array.isArray(data)) throw new Error("not an array");
-    save(data);
-    render();
-  } catch {
-    alert("Invalid JSON file.");
+    const r = mergeJson(await file.text());
+    alert(`Added ${r.added}, skipped ${r.skipped}.`);
+  } catch (err) {
+    alert("Invalid JSON file: " + err.message);
   }
   e.target.value = "";
 });
