@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-.venv/
-venv/
-.env
-
-# Local-only OAuth artifacts. Never commit these.
-credentials.json
-token.json

@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Kathmandu Budget Tracker</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #262a33;
+    --text: #e6e8ec;
+    --muted: #8b919b;
+    --debit: #ff6b6b;
+    --credit: #4ade80;
+    --accent: #6ea8ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
+
+  .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .val { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .val.debit  { color: var(--debit); }
+  .val.credit { color: var(--credit); }
+
+  details.accounts { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; margin-bottom: 20px; }
+  details.accounts summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px 0; }
+  .acct-row { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--border); font-size: 14px; }
+  .acct-row:first-of-type { border-top: 0; }
+  .acct-name { color: var(--muted); }
+
+  textarea, input, select, button {
+    font: inherit; color: var(--text);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px;
+  }
+  textarea { width: 100%; min-height: 120px; resize: vertical; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #0a1126; border-color: transparent; font-weight: 600; }
+  button.danger  { background: transparent; color: var(--debit); border-color: var(--border); }
+  button.ghost   { background: transparent; color: var(--muted); border-color: var(--border); }
+
+  h2 { font-size: 14px; color: var(--muted); margin: 28px 0 8px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+
+  .manual { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 8px; }
+  .manual input, .manual select { width: 100%; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.amt.debit  { color: var(--debit); }
+  td.amt.credit { color: var(--credit); }
+  td.note { color: var(--muted); max-width: 320px; word-break: break-word; }
+  .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #20252e; color: var(--muted); }
+  .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--border); border-radius: 10px; }
+
+  @media (max-width: 600px) {
+    .totals { grid-template-columns: 1fr; }
+    .manual { grid-template-columns: 1fr 1fr; }
+    th.hide-sm, td.hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Kathmandu Budget Tracker</h1>
+  <div class="sub">Paste a bank email below, or add a transaction manually. Data lives in this browser.</div>
+
+  <div class="totals">
+    <div class="card"><div class="label">Spent</div><div id="t-debit"  class="val debit">₹0</div></div>
+    <div class="card"><div class="label">Received</div><div id="t-credit" class="val credit">₹0</div></div>
+    <div class="card"><div class="label">Net</div><div id="t-net" class="val">₹0</div></div>
+  </div>
+
+  <details class="accounts">
+    <summary>By account</summary>
+    <div id="by-account"></div>
+  </details>
+
+  <h2>Paste email</h2>
+  <textarea id="paste" placeholder="Paste the full bank email here. Works for Axis and Jupiter alerts."></textarea>
+  <div class="row">
+    <button class="primary" id="parse-btn">Parse &amp; add</button>
+    <button class="ghost"   id="clear-paste-btn">Clear</button>
+    <span id="parse-msg" class="sub" style="margin: 10px 0 0; align-self: center;"></span>
+  </div>
+
+  <h2>Add manually</h2>
+  <div class="manual">
+    <select id="m-bank">
+      <option value="axis">Axis</option>
+      <option value="jupiter">Jupiter</option>
+      <option value="cash">Cash</option>
+      <option value="other">Other</option>
+    </select>
+    <input id="m-account"   placeholder="Acct (last 4)" />
+    <select id="m-direction">
+      <option value="debit">Debit</option>
+      <option value="credit">Credit</option>
+    </select>
+    <input id="m-amount" type="number" step="0.01" min="0" placeholder="Amount (₹)" />
+    <button class="primary" id="m-add">Add</button>
+  </div>
+  <div class="row">
+    <input id="m-note" placeholder="Note (optional)" style="flex:1; min-width: 200px;" />
+  </div>
+
+  <h2>Transactions</h2>
+  <table id="tx-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Bank</th>
+        <th class="hide-sm">Acct</th>
+        <th class="hide-sm">Note</th>
+        <th class="amt">Amount</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tx-body"></tbody>
+  </table>
+  <div id="tx-empty" class="empty" style="display:none;">No transactions yet.</div>
+
+  <h2>Backup</h2>
+  <div class="row">
+    <button class="ghost"  id="export-btn">Export JSON</button>
+    <button class="ghost"  id="import-btn">Import JSON</button>
+    <input type="file" id="import-file" accept="application/json" hidden />
+    <button class="danger" id="reset-btn">Reset all</button>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = "budget-tracker-v1";
+
+// ---------- math ----------
+const fmt = n => "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+function totals(txs) {
+  let debit = 0, credit = 0;
+  const byAcct = {};
+  for (const t of txs) {
+    const key = `${t.bank}${t.account ? " ••" + t.account : ""}`;
+    byAcct[key] ??= { debit: 0, credit: 0 };
+    byAcct[key][t.direction] += t.amount;
+    if (t.direction === "debit") debit += t.amount;
+    else if (t.direction === "credit") credit += t.amount;
+  }
+  return { debit, credit, net: credit - debit, byAcct };
+}
+
+// ---------- parsing ----------
+const AMOUNT_RE  = /(?:INR|Rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
+const ACCOUNT_RE = /(?:A\/?c(?:\s*no\.?)?|account)\s*(?:XX|X+|\*+)?(\d{3,6})/i;
+const CARD_RE    = /card\s*(?:ending\s*(?:in|with))?\s*(?:XX|X+|\*+)?(\d{3,6})/i;
+
+const DEBIT_WORDS  = ["debited","spent","paid","withdrawn","purchase","sent","debit"];
+const CREDIT_WORDS = ["credited","received","deposited","refund","credit"];
+
+function parseEmail(text) {
+  if (!text || !text.trim()) return null;
+  const lo = text.toLowerCase();
+
+  let bank = "other";
+  if (/axis ?bank|axisbank\.com/i.test(text)) bank = "axis";
+  else if (/jupiter\.money|jupiter|csb\.co\.in|csb bank/i.test(text)) bank = "jupiter";
+
+  const am = text.match(AMOUNT_RE);
+  if (!am) return null;
+  const amount = parseFloat(am[1].replace(/,/g, ""));
+  if (!isFinite(amount) || amount <= 0) return null;
+
+  let direction = null;
+  if (DEBIT_WORDS.some(w => lo.includes(w)))      direction = "debit";
+  else if (CREDIT_WORDS.some(w => lo.includes(w))) direction = "credit";
+  if (!direction) return null;
+
+  const ac = text.match(ACCOUNT_RE) || text.match(CARD_RE);
+  const account = ac ? ac[1] : null;
+
+  const note = text.trim().replace(/\s+/g, " ").slice(0, 160);
+  return {
+    id: crypto.randomUUID(),
+    date: new Date().toISOString(),
+    bank, account, direction, amount, note,
+  };
+}
+
+// ---------- storage ----------
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
+  catch { return []; }
+}
+function save(txs) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(txs));
+}
+
+// ---------- render ----------
+const $ = id => document.getElementById(id);
+
+function render() {
+  const txs = load().sort((a, b) => b.date.localeCompare(a.date));
+  const t = totals(txs);
+
+  $("t-debit").textContent  = fmt(t.debit);
+  $("t-credit").textContent = fmt(t.credit);
+  const netEl = $("t-net");
+  netEl.textContent = fmt(t.net);
+  netEl.className = "val " + (t.net < 0 ? "debit" : "credit");
+
+  const byAccDiv = $("by-account");
+  const entries = Object.entries(t.byAcct);
+  byAccDiv.innerHTML = entries.length === 0
+    ? '<div class="acct-row"><span class="acct-name">No data yet</span><span></span></div>'
+    : entries.map(([name, v]) => `
+      <div class="acct-row">
+        <span class="acct-name">${name}</span>
+        <span><span style="color:var(--debit)">-${fmt(v.debit)}</span> &nbsp; <span style="color:var(--credit)">+${fmt(v.credit)}</span></span>
+      </div>`).join("");
+
+  const body = $("tx-body");
+  $("tx-empty").style.display = txs.length ? "none" : "block";
+  body.innerHTML = txs.map(tx => `
+    <tr>
+      <td>${new Date(tx.date).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}</td>
+      <td><span class="pill">${tx.bank}</span></td>
+      <td class="hide-sm">${tx.account ? "••" + tx.account : ""}</td>
+      <td class="hide-sm note">${(tx.note || "").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]))}</td>
+      <td class="amt ${tx.direction}">${tx.direction === "debit" ? "-" : "+"}${fmt(tx.amount)}</td>
+      <td><button class="ghost" data-del="${tx.id}">×</button></td>
+    </tr>`).join("");
+}
+
+function addTx(tx) {
+  const txs = load();
+  txs.push(tx);
+  save(txs);
+  render();
+}
+
+// ---------- events ----------
+$("parse-btn").addEventListener("click", () => {
+  const text = $("paste").value;
+  const msg  = $("parse-msg");
+  const tx = parseEmail(text);
+  if (!tx) {
+    msg.textContent = "Couldn't parse — check the email or use manual entry.";
+    msg.style.color = "var(--debit)";
+    return;
+  }
+  addTx(tx);
+  $("paste").value = "";
+  msg.textContent = `Added ${tx.bank} ${tx.direction} ${fmt(tx.amount)}`;
+  msg.style.color = "var(--credit)";
+});
+
+$("clear-paste-btn").addEventListener("click", () => {
+  $("paste").value = "";
+  $("parse-msg").textContent = "";
+});
+
+$("m-add").addEventListener("click", () => {
+  const amount = parseFloat($("m-amount").value);
+  if (!isFinite(amount) || amount <= 0) return;
+  addTx({
+    id: crypto.randomUUID(),
+    date: new Date().toISOString(),
+    bank: $("m-bank").value,
+    account: $("m-account").value.trim() || null,
+    direction: $("m-direction").value,
+    amount,
+    note: $("m-note").value.trim(),
+  });
+  $("m-amount").value = "";
+  $("m-note").value = "";
+});
+
+document.addEventListener("click", e => {
+  const id = e.target.dataset?.del;
+  if (!id) return;
+  save(load().filter(t => t.id !== id));
+  render();
+});
+
+$("export-btn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(load(), null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `transactions-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+$("import-btn").addEventListener("click", () => $("import-file").click());
+$("import-file").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data)) throw new Error("not an array");
+    save(data);
+    render();
+  } catch {
+    alert("Invalid JSON file.");
+  }
+  e.target.value = "";
+});
+
+$("reset-btn").addEventListener("click", () => {
+  if (confirm("Delete all transactions?")) {
+    localStorage.removeItem(STORAGE_KEY);
+    render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>
