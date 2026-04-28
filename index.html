@@ -66,6 +66,25 @@
   .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #20252e; color: var(--muted); }
   .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--border); border-radius: 10px; }
 
+  .runway { background: linear-gradient(180deg, #1a2030, #161a23); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .runway-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .runway-title { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .runway-headline { font-size: 18px; font-weight: 600; }
+  .runway-headline .ok   { color: var(--credit); }
+  .runway-headline .warn { color: var(--debit); }
+  .bar { background: #0c0f15; border-radius: 999px; height: 10px; margin-top: 12px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .25s ease; }
+  .bar > span.over { background: var(--debit); }
+  .runway-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; font-size: 13px; }
+  .runway-grid div { color: var(--muted); }
+  .runway-grid div b { display: block; color: var(--text); font-size: 16px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .runway-cfg { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+  .runway-cfg input { width: 110px; padding: 6px 8px; font-size: 13px; }
+
+  @media (max-width: 600px) {
+    .runway-grid { grid-template-columns: 1fr 1fr; }
+  }
+
   @media (max-width: 600px) {
     .totals { grid-template-columns: 1fr; }
     .manual { grid-template-columns: 1fr 1fr; }
@@ -77,6 +96,27 @@
 <div class="wrap">
   <h1>Kathmandu Budget Tracker</h1>
   <div class="sub">Paste a bank email below, or add a transaction manually. Data lives in this browser.</div>
+
+  <div class="runway">
+    <div class="runway-head">
+      <span class="runway-title">Runway</span>
+      <span class="runway-headline" id="r-headline">—</span>
+    </div>
+    <div class="bar"><span id="r-bar"></span></div>
+    <div class="runway-grid">
+      <div>Today<b id="r-today">₹0 / ₹0</b></div>
+      <div>Spent<b id="r-spent">₹0</b></div>
+      <div>Left<b id="r-left">₹0</b></div>
+      <div>Day<b id="r-day">— / —</b></div>
+      <div>Avg/day<b id="r-avg">₹0</b></div>
+      <div>Days left at pace<b id="r-pace">—</b></div>
+    </div>
+    <div class="runway-cfg">
+      <label>₹/day <input id="cfg-daily"  type="number" min="1" step="1" /></label>
+      <label>days  <input id="cfg-runway" type="number" min="1" step="1" /></label>
+      <label>start <input id="cfg-start"  type="date" /></label>
+    </div>
+  </div>
 
   <div class="totals">
     <div class="card"><div class="label">Spent</div><div id="t-debit"  class="val debit">₹0</div></div>
@@ -144,9 +184,18 @@
 
 <script>
 const STORAGE_KEY = "budget-tracker-v1";
+const SETTINGS_KEY = "budget-tracker-settings-v1";
+const SETTINGS_DEFAULT = { dailyBudget: 1500, runwayDays: 50, startDate: new Date().toISOString().slice(0, 10) };
 
 // ---------- math ----------
-const fmt = n => "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const fmt = n => "₹" + Math.round(n).toLocaleString("en-IN");
+const dayKey = iso => iso.slice(0, 10);
+const today  = () => new Date().toISOString().slice(0, 10);
+function daysBetween(a, b) {
+  // inclusive day count from a (YYYY-MM-DD) to b (YYYY-MM-DD), min 1
+  const ms = new Date(b + "T00:00:00").getTime() - new Date(a + "T00:00:00").getTime();
+  return Math.max(1, Math.floor(ms / 86400000) + 1);
+}
 
 function totals(txs) {
   let debit = 0, credit = 0;
@@ -206,13 +255,66 @@ function load() {
 function save(txs) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(txs));
 }
+function loadSettings() {
+  try { return { ...SETTINGS_DEFAULT, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; }
+  catch { return { ...SETTINGS_DEFAULT }; }
+}
+function saveSettings(s) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+}
 
 // ---------- render ----------
 const $ = id => document.getElementById(id);
 
+function renderRunway(txs, s) {
+  const totalBudget = s.dailyBudget * s.runwayDays;
+  const debitTxs    = txs.filter(t => t.direction === "debit");
+  const spent       = debitTxs.reduce((sum, t) => sum + t.amount, 0);
+  const left        = Math.max(0, totalBudget - spent);
+
+  const todayStr   = today();
+  const dayNum     = daysBetween(s.startDate, todayStr);
+  const elapsed    = Math.min(dayNum, s.runwayDays);
+  const todaySpent = debitTxs.filter(t => dayKey(t.date) === todayStr).reduce((s, t) => s + t.amount, 0);
+  const avg        = elapsed > 0 ? spent / elapsed : 0;
+  const paceDays   = avg > 0 ? Math.floor(left / avg) : Infinity;
+  const onTrack    = avg <= s.dailyBudget;
+
+  $("r-today").textContent = `${fmt(todaySpent)} / ${fmt(s.dailyBudget)}`;
+  $("r-spent").textContent = `${fmt(spent)} / ${fmt(totalBudget)}`;
+  $("r-left").textContent  = fmt(left);
+  $("r-day").textContent   = `${dayNum} / ${s.runwayDays}`;
+  $("r-avg").textContent   = fmt(avg);
+  $("r-pace").textContent  = isFinite(paceDays) ? `${paceDays} d` : "∞";
+
+  const headline = $("r-headline");
+  if (spent >= totalBudget) {
+    headline.innerHTML = `<span class="warn">Runway gone</span>`;
+  } else if (!isFinite(paceDays)) {
+    headline.innerHTML = `<span class="ok">${s.runwayDays} days planned · no spend yet</span>`;
+  } else if (onTrack) {
+    headline.innerHTML = `<span class="ok">On pace · ${paceDays} days left at this rate</span>`;
+  } else {
+    const overBy = avg - s.dailyBudget;
+    headline.innerHTML = `<span class="warn">Over by ${fmt(overBy)}/day · ${paceDays} days left</span>`;
+  }
+
+  const bar = $("r-bar");
+  const pct = Math.min(100, (spent / totalBudget) * 100);
+  bar.style.width = pct + "%";
+  bar.classList.toggle("over", !onTrack || spent > totalBudget);
+}
+
 function render() {
+  const s = loadSettings();
+  $("cfg-daily").value  = s.dailyBudget;
+  $("cfg-runway").value = s.runwayDays;
+  $("cfg-start").value  = s.startDate;
+
   const txs = load().sort((a, b) => b.date.localeCompare(a.date));
   const t = totals(txs);
+
+  renderRunway(txs, s);
 
   $("t-debit").textContent  = fmt(t.debit);
   $("t-credit").textContent = fmt(t.credit);
@@ -325,6 +427,23 @@ $("reset-btn").addEventListener("click", () => {
     render();
   }
 });
+
+function bindCfg(id, key, parse = v => v) {
+  $(id).addEventListener("change", () => {
+    const s = loadSettings();
+    const v = parse($(id).value);
+    if (v === null || v === undefined || (typeof v === "number" && (!isFinite(v) || v <= 0))) return;
+    s[key] = v;
+    saveSettings(s);
+    render();
+  });
+}
+bindCfg("cfg-daily",  "dailyBudget", v => parseFloat(v));
+bindCfg("cfg-runway", "runwayDays",  v => parseInt(v, 10));
+bindCfg("cfg-start",  "startDate",   v => v || null);
+
+// Seed defaults so first-load shows ₹1500 / 50 days / today.
+if (!localStorage.getItem(SETTINGS_KEY)) saveSettings(SETTINGS_DEFAULT);
 
 render();
 </script>
